@@ -36,5 +36,6 @@ library
     UndecidableSuperClasses
     BlockArguments
     LambdaCase
+    NoStarIsType
   hs-source-dirs: src
   ghc-options: -Wall -O2

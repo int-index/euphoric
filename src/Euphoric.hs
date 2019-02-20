@@ -4,14 +4,14 @@ import Data.Kind (Type)
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
 import Control.Monad.Trans.State
 
-data Grammar tok prods = MkGrammar (GrammarBuilder tok prods prods)
+data Grammar tok m prods = MkGrammar (GrammarBuilder tok m prods prods)
 
-data GrammarBuilder tok (allProds :: [(Symbol, Type)]) (prods :: [(Symbol, Type)]) where
-  EndOfGrammar :: GrammarBuilder tok allProds '[]
+data GrammarBuilder tok m (allProds :: [(Symbol, Type)]) (prods :: [(Symbol, Type)]) where
+  EndOfGrammar :: GrammarBuilder tok m allProds '[]
   GrammarCons ::
-    Prod tok allProds ty ->
-    GrammarBuilder tok allProds prods ->
-    GrammarBuilder tok allProds ('(sym, ty) : prods)
+    Prod tok m allProds ty ->
+    GrammarBuilder tok m allProds prods ->
+    GrammarBuilder tok m allProds ('(sym, ty) : prods)
 
 data Symbols xs where
   SymbolsNil :: Symbols '[]
@@ -34,32 +34,40 @@ type family WithReprs allProds syms ty where
   WithReprs allProds (sym:syms) ty =
     Repr allProds sym -> WithReprs allProds syms ty
 
-data Rule allProds ty =
-  forall syms. MkRule (Symbols syms) (WithReprs allProds syms ty)
+data Rule allProds m ty =
+  forall syms. MkRule  (Symbols syms) (WithReprs allProds syms ty) |
+  forall syms. MkRuleM (Symbols syms) (WithReprs allProds syms (m ty))
 
-data Prod tok (allProds :: [(Symbol, Type)]) ty =
+data Prod tok m (allProds :: [(Symbol, Type)]) ty =
   MkTerm (tok -> Maybe ty) |
-  MkNonTerm [Rule allProds ty]
+  MkNonTerm [Rule allProds m ty]
 
 rule ::
-  forall syms allProds ty.
+  forall syms allProds m ty.
   Syms syms =>
   WithReprs allProds syms ty ->
-  State [Rule allProds ty] ()
+  State [Rule allProds m ty] ()
 rule reduction = modify (MkRule (syms @syms) reduction:)
 
+ruleM ::
+  forall syms allProds m ty.
+  Syms syms =>
+  WithReprs allProds syms (m ty) ->
+  State [Rule allProds m ty] ()
+ruleM reduction = modify (MkRuleM (syms @syms) reduction:)
+
 tm ::
-  forall sym ty tok allProds prods.
+  forall sym ty tok m allProds prods.
   (tok -> Maybe ty) ->
-  GrammarBuilder tok allProds prods ->
-  GrammarBuilder tok allProds ('(sym, ty) : prods)
+  GrammarBuilder tok m allProds prods ->
+  GrammarBuilder tok m allProds ('(sym, ty) : prods)
 tm f = GrammarCons (MkTerm f)
 
 nt ::
-  forall sym ty tok allProds prods.
-  State [Rule allProds ty] () ->
-  GrammarBuilder tok allProds prods ->
-  GrammarBuilder tok allProds ('(sym, ty) : prods)
+  forall sym ty tok m allProds prods.
+  State [Rule allProds m ty] () ->
+  GrammarBuilder tok m allProds prods ->
+  GrammarBuilder tok m allProds ('(sym, ty) : prods)
 nt s = GrammarCons (MkNonTerm (execState s []))
 
 -----------------------------------------------------------
@@ -72,7 +80,7 @@ data ExToken =
 
 data ExRepr = ExPar ExRepr | ExBLit Bool
 
-grammar :: Grammar ExToken _
+grammar :: Grammar ExToken (State Int) _
 grammar = MkGrammar
   $ tm @"true" @Bool
     \case ExTokTrue -> Just True
@@ -87,7 +95,7 @@ grammar = MkGrammar
     \case ExTokRPar -> Just ()
           _ -> Nothing
   $ nt @"expr" @ExRepr
-    do rule @'["(", "expr", ")"]     \_ e _ -> ExPar e
-       rule @'["true"]               \t -> ExBLit t
-       rule @'["false"]              \t -> ExBLit t
+    do ruleM @'["(", "expr", ")"]    \_ e _ -> ExPar e <$ modify (+1)
+       rule  @'["true"]              \t -> ExBLit t
+       rule  @'["false"]             \t -> ExBLit t
   $ EndOfGrammar
