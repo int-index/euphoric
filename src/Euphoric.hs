@@ -3,6 +3,7 @@ module Euphoric where
 import Data.Kind (Type)
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
 import Control.Monad.Trans.State
+import Language.Haskell.TH (PatQ, TExpQ)
 
 data Grammar tok m prods = MkGrammar (GrammarBuilder tok m prods prods)
 
@@ -35,32 +36,32 @@ type family WithReprs allProds syms ty where
     Repr allProds sym -> WithReprs allProds syms ty
 
 data Rule allProds m ty =
-  forall syms. MkRule  (Symbols syms) (WithReprs allProds syms ty) |
-  forall syms. MkRuleM (Symbols syms) (WithReprs allProds syms (m ty))
+  forall syms. MkRule  (Symbols syms) (TExpQ (WithReprs allProds syms ty)) |
+  forall syms. MkRuleM (Symbols syms) (TExpQ (WithReprs allProds syms (m ty)))
 
 data Prod tok m (allProds :: [(Symbol, Type)]) ty =
-  MkTerm (tok -> Maybe ty) |
+  MkTerm PatQ |
   MkNonTerm [Rule allProds m ty]
 
 rule ::
   forall syms allProds m ty.
   Syms syms =>
-  WithReprs allProds syms ty ->
+  TExpQ (WithReprs allProds syms ty) ->
   State [Rule allProds m ty] ()
 rule reduction = modify (MkRule (syms @syms) reduction:)
 
 ruleM ::
   forall syms allProds m ty.
   Syms syms =>
-  WithReprs allProds syms (m ty) ->
+  TExpQ (WithReprs allProds syms (m ty)) ->
   State [Rule allProds m ty] ()
 ruleM reduction = modify (MkRuleM (syms @syms) reduction:)
 
 tm ::
-  forall sym ty tok m allProds prods.
-  (tok -> Maybe ty) ->
+  forall sym tok m allProds prods.
+  PatQ ->
   GrammarBuilder tok m allProds prods ->
-  GrammarBuilder tok m allProds ('(sym, ty) : prods)
+  GrammarBuilder tok m allProds ('(sym, tok) : prods)
 tm f = GrammarCons (MkTerm f)
 
 nt ::
@@ -82,20 +83,12 @@ data ExRepr = ExPar ExRepr | ExBLit Bool
 
 grammar :: Grammar ExToken (State Int) _
 grammar = MkGrammar
-  $ tm @"true" @Bool
-    \case ExTokTrue -> Just True
-          _ -> Nothing
-  $ tm @"false" @Bool
-    \case ExTokFalse -> Just False
-          _ -> Nothing
-  $ tm @"(" @()
-    \case ExTokLPar -> Just ()
-          _ -> Nothing
-  $ tm @")" @()
-    \case ExTokRPar -> Just ()
-          _ -> Nothing
+  $ tm @"true"  [p|ExTokTrue|]
+  $ tm @"false" [p|ExTokFalse|]
+  $ tm @"(" [p|ExTokLPar|]
+  $ tm @")" [p|ExTokRPar|]
   $ nt @"expr" @ExRepr
-    do ruleM @'["(", "expr", ")"]    \_ e _ -> ExPar e <$ modify (+1)
-       rule  @'["true"]              \t -> ExBLit t
-       rule  @'["false"]             \t -> ExBLit t
+    do ruleM @'["(", "expr", ")"]  [|| \_ e _ -> ExPar e <$ modify (+1) ||]
+       rule  @'["true"]            [|| \_ -> ExBLit True ||]
+       rule  @'["false"]           [|| \_ -> ExBLit False ||]
   $ EndOfGrammar
