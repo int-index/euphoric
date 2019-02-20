@@ -116,14 +116,22 @@ pprUSym = TH.Ppr.quotes . TH.Ppr.text
 
 pprUGrammar :: UGrammar -> TH.Ppr.Doc
 pprUGrammar (UGrammar utms unts) =
-  TH.Ppr.vcat (map pprUTerm utms ++ map pprUNonTerm unts)
+  TH.Ppr.hang (TH.Ppr.text "%token") 2
+    (TH.Ppr.vcat (map pprUTerm utms))
+  TH.Ppr.$$
+  TH.Ppr.text "%%" TH.Ppr.$$
+    TH.Ppr.vcat (map pprUNonTerm unts)
 
 pprUTerm :: (String, Pat) -> TH.Ppr.Doc
 pprUTerm (s, pat) = pprUSym s TH.Ppr.<+> TH.Ppr.braces (TH.Ppr.ppr pat)
 
 pprUNonTerm :: (String, [URule]) -> TH.Ppr.Doc
-pprUNonTerm (s, rules) =
-  TH.Ppr.hang (pprUSym s) 2 (TH.Ppr.vcat (map pprURule rules))
+pprUNonTerm (_, []) = error "pprUNonTerm: empty rules"
+pprUNonTerm (s, rule1:rules) =
+  TH.Ppr.hang (pprUSym s) 2 $
+    TH.Ppr.char ':' TH.Ppr.<+> pprURule rule1
+    TH.Ppr.$$
+    TH.Ppr.vcat [TH.Ppr.char '|' TH.Ppr.<+> pprURule ruleN | ruleN <- rules]
 
 pprURule :: URule -> TH.Ppr.Doc
 pprURule (URule ss e) =
@@ -152,8 +160,10 @@ grammar = MkGrammar
   $ tm @"false" [p|ExTokFalse|]
   $ tm @"(" [p|ExTokLPar|]
   $ tm @")" [p|ExTokRPar|]
+  $ nt @"lit" @ExRepr
+    do rule  @'["true"]            [|| \_ -> ExBLit True ||]
+       rule  @'["false"]           [|| \_ -> ExBLit False ||]
   $ nt @"expr" @ExRepr
     do ruleM @'["(", "expr", ")"]  [|| \_ e _ -> ExPar e <$ modify (+1) ||]
-       rule  @'["true"]            [|| \_ -> ExBLit True ||]
-       rule  @'["false"]           [|| \_ -> ExBLit False ||]
+       rule  @'["lit"]             [|| id ||]
   $ EndOfGrammar
