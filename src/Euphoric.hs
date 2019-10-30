@@ -4,10 +4,11 @@ import Data.Kind (Type)
 import Data.Proxy
 import GHC.TypeLits
 import Control.Monad.Trans.State
-import Language.Haskell.TH (PatQ, Pat, TExpQ, Exp, Q)
-import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH (PatQ, Pat, TExp, TExpQ, Exp)
+import qualified Language.Haskell.TH.Syntax as TH
 import qualified Language.Haskell.TH.Ppr as TH.Ppr
 import qualified Language.Haskell.TH.PprLib as TH.Ppr
+import MiniQ
 
 data Grammar tok m prods = MkGrammar (GrammarBuilder tok m prods prods)
 
@@ -46,11 +47,11 @@ type family WithReprs allProds syms ty where
     Repr allProds sym -> WithReprs allProds syms ty
 
 data Rule allProds m ty =
-  forall syms. MkRule  (Symbols syms) (TExpQ (WithReprs allProds syms ty)) |
-  forall syms. MkRuleM (Symbols syms) (TExpQ (WithReprs allProds syms (m ty)))
+  forall syms. MkRule  (Symbols syms) (TExp (WithReprs allProds syms ty)) |
+  forall syms. MkRuleM (Symbols syms) (TExp (WithReprs allProds syms (m ty)))
 
 data Prod tok m (allProds :: [(Symbol, Type)]) ty =
-  MkTerm PatQ |
+  MkTerm Pat |
   MkNonTerm [Rule allProds m ty]
 
 rule ::
@@ -58,14 +59,14 @@ rule ::
   Syms syms =>
   TExpQ (WithReprs allProds syms ty) ->
   State [Rule allProds m ty] ()
-rule reduction = modify (MkRule (syms @syms) reduction:)
+rule reduction = modify (MkRule (syms @syms) (runMiniQ reduction):)
 
 ruleM ::
   forall syms allProds m ty.
   Syms syms =>
   TExpQ (WithReprs allProds syms (m ty)) ->
   State [Rule allProds m ty] ()
-ruleM reduction = modify (MkRuleM (syms @syms) reduction:)
+ruleM reduction = modify (MkRuleM (syms @syms) (runMiniQ reduction):)
 
 tm ::
   forall sym tok m allProds prods.
@@ -73,7 +74,7 @@ tm ::
   PatQ ->
   GrammarBuilder tok m allProds prods ->
   GrammarBuilder tok m allProds ('(sym, tok) : prods)
-tm f = GrammarCons Proxy (MkTerm f)
+tm f = GrammarCons Proxy (MkTerm (runMiniQ f))
 
 nt ::
   forall sym ty tok m allProds prods.
@@ -87,29 +88,25 @@ data UGrammar = UGrammar [(String, Pat)] [(String, [URule])]
 
 data URule = URule [String] Exp | URuleM [String] Exp
 
-toUGrammar :: Grammar tok m prods -> Q UGrammar
+toUGrammar :: Grammar tok m prods -> UGrammar
 toUGrammar (MkGrammar g) = toUGrammar' g
 
-toUGrammar' :: GrammarBuilder tok m allProds prods -> Q UGrammar
-toUGrammar' EndOfGrammar = return (UGrammar [] [])
-toUGrammar' (GrammarCons symProxy p g) = do
+toUGrammar' :: GrammarBuilder tok m allProds prods -> UGrammar
+toUGrammar' EndOfGrammar = UGrammar [] []
+toUGrammar' (GrammarCons symProxy p g) =
   let sym = symbolVal symProxy
-  UGrammar utms unts <- toUGrammar' g
-  case p of
-    MkTerm qpat -> do
-      pat <- qpat
-      return (UGrammar ((sym,pat):utms) unts)
-    MkNonTerm rules -> do
-      urules <- traverse toURule rules
-      return (UGrammar utms ((sym,urules):unts))
+      UGrammar utms unts = toUGrammar' g
+  in case p of
+    MkTerm pat -> UGrammar ((sym,pat):utms) unts
+    MkNonTerm rules ->
+      let urules = map toURule rules
+      in UGrammar utms ((sym,urules):unts)
 
-toURule :: Rule allProds m ty -> Q URule
-toURule (MkRule symbols texpq) = do
-  texp <- texpq
-  return (URule (symbolsVal symbols) (TH.unType texp))
-toURule (MkRuleM symbols texpq) = do
-  texp <- texpq
-  return (URuleM (symbolsVal symbols) (TH.unType texp))
+toURule :: Rule allProds m ty -> URule
+toURule (MkRule symbols texp) =
+  URule (symbolsVal symbols) (TH.unType texp)
+toURule (MkRuleM symbols texp) =
+  URuleM (symbolsVal symbols) (TH.unType texp)
 
 pprUSym :: String -> TH.Ppr.Doc
 pprUSym = TH.Ppr.quotes . TH.Ppr.text
@@ -141,8 +138,8 @@ pprURule (URuleM ss e) =
   TH.Ppr.hsep (map pprUSym ss) TH.Ppr.<+>
   TH.Ppr.text "{%" TH.Ppr.<+> TH.Ppr.ppr e TH.Ppr.<+> TH.Ppr.text "}"
 
-happyGrammarY :: Grammar tok m prods -> TH.ExpQ
-happyGrammarY g = TH.stringE . show . pprUGrammar =<< toUGrammar g
+pprGrammar :: Grammar tok m prods -> TH.Ppr.Doc
+pprGrammar = pprUGrammar . toUGrammar
 
 -----------------------------------------------------------
 

@@ -6,6 +6,7 @@ build-type: Simple
 
 library
   exposed-modules:
+    MiniQ
     Euphoric
   build-depends:
     base, transformers, template-haskell
@@ -37,5 +38,6 @@ library
     BlockArguments
     LambdaCase
     NoStarIsType
+    DerivingStrategies
   hs-source-dirs: src
   ghc-options: -Wall -O2

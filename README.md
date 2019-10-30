@@ -1,5 +1,5 @@
 # Euphoric - a parsing experiment
 
 ```
-ghci> putStrLn $(happyGrammarY grammar)
+ghci> pprGrammar grammar
 ```
