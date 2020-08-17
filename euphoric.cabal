@@ -8,6 +8,7 @@ library
   exposed-modules:
     MiniQ
     Euphoric
+    Example
   build-depends:
     base, transformers, template-haskell
   default-language:
