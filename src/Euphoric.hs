@@ -4,7 +4,7 @@ import Data.Kind (Type)
 import Data.Proxy
 import GHC.TypeLits
 import Control.Monad.Trans.State
-import Language.Haskell.TH (PatQ, Pat, TExp, TExpQ, Exp)
+import Language.Haskell.TH (Pat, TExp, Exp)
 import qualified Language.Haskell.TH.Syntax as TH
 import qualified Language.Haskell.TH.Ppr as TH.Ppr
 import qualified Language.Haskell.TH.PprLib as TH.Ppr
@@ -57,21 +57,21 @@ data Prod tok m (allProds :: [(Symbol, Type)]) ty =
 rule ::
   forall syms allProds m ty.
   Syms syms =>
-  TExpQ (WithReprs allProds syms ty) ->
+  TH.Code MiniQ (WithReprs allProds syms ty) ->
   State [Rule allProds m ty] ()
-rule reduction = modify (MkRule (syms @syms) (runMiniQ reduction):)
+rule reduction = modify (MkRule (syms @syms) (runMiniQ (TH.examineCode reduction)):)
 
 ruleM ::
   forall syms allProds m ty.
   Syms syms =>
-  TExpQ (WithReprs allProds syms (m ty)) ->
+  TH.Code MiniQ (WithReprs allProds syms (m ty)) ->
   State [Rule allProds m ty] ()
-ruleM reduction = modify (MkRuleM (syms @syms) (runMiniQ reduction):)
+ruleM reduction = modify (MkRuleM (syms @syms) (runMiniQ (TH.examineCode reduction)):)
 
 tm ::
   forall sym tok m allProds prods.
   KnownSymbol sym =>
-  PatQ ->
+  MiniQ Pat ->
   GrammarBuilder tok m allProds prods ->
   GrammarBuilder tok m allProds ('(sym, tok) : prods)
 tm f = GrammarCons Proxy (MkTerm (runMiniQ f))
