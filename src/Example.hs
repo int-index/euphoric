@@ -9,7 +9,12 @@ data ExToken =
   ExTokLPar |
   ExTokRPar
 
-data ExRepr = ExPar ExRepr | ExBLit Bool
+class ExResult r where
+  true :: r
+  false :: r
+  par :: r -> r
+
+newtype ExValue = EV (forall r. ExResult r => r)
 
 grammar :: Grammar ExToken (State Int) _
 grammar = MkGrammar
@@ -17,10 +22,10 @@ grammar = MkGrammar
   $ tm @"false" [p|ExTokFalse|]
   $ tm @"(" [p|ExTokLPar|]
   $ tm @")" [p|ExTokRPar|]
-  $ nt @"lit" @ExRepr
-    do rule  @'["true"]            [|| \_ -> ExBLit True ||]
-       rule  @'["false"]           [|| \_ -> ExBLit False ||]
-  $ nt @"expr" @ExRepr
-    do ruleM @'["(", "expr", ")"]  [|| \_ e _ -> ExPar e <$ modify (+1) ||]
+  $ nt @"lit" @ExValue
+    do rule  @'["true"]            [|| \_ -> EV true ||]
+       rule  @'["false"]           [|| \_ -> EV false ||]
+  $ nt @"expr" @ExValue
+    do ruleM @'["(", "expr", ")"]  [|| \_ (EV e) _ -> EV (par e) <$ modify (+1) ||]
        rule  @'["lit"]             [|| id ||]
   $ EndOfGrammar
