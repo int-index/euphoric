@@ -1,4 +1,4 @@
-cabal-version: 2.1
+cabal-version: 3.0
 name: euphoric
 version: 0.1
 author: Vladislav Zavialov
