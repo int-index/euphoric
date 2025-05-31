@@ -1,10 +1,13 @@
 {
   description = "euphoric - a parser generator";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  };
   outputs =
     { self, nixpkgs }:
     let
       system = "x86_64-linux";
-      ghc = "ghc924";
+      ghc = "ghc912";
       pkgs = nixpkgs.legacyPackages.${system};
       haskellPackages =
         pkgs.haskell.packages.${ghc}.extend(hself: hsuper: {
@@ -12,12 +15,14 @@
         });
     in
     {
-      defaultPackage.${system} = haskellPackages.khutor;
+      defaultPackage.${system} = haskellPackages.euphoric;
       devShell.${system} = pkgs.mkShell {
         buildInputs = [
-          haskellPackages.hie-bios
-          haskellPackages.haskell-language-server
-          haskellPackages.cabal-install
+          (haskellPackages.ghcWithPackages(p: p.euphoric.getCabalDeps.libraryHaskellDepends))
+          # haskellPackages.hie-bios
+          # haskellPackages.haskell-language-server
+          # haskellPackages.cabal-install
+          pkgs.cabal-install
         ];
       };
     };
