@@ -10,9 +10,9 @@ library
     Euphoric
     Example
   build-depends:
-    base, transformers, template-haskell
+    base, ghc-experimental, transformers, template-haskell
   default-language:
-    Haskell2010
+    GHC2024
   default-extensions:
     AllowAmbiguousTypes
     ConstraintKinds
@@ -28,6 +28,7 @@ library
     PolyKinds
     ScopedTypeVariables
     RankNTypes
+    RequiredTypeArguments
     TemplateHaskell
     TupleSections
     TypeApplications
@@ -38,6 +39,7 @@ library
     UndecidableSuperClasses
     BlockArguments
     LambdaCase
+    NoListTuplePuns
     NoStarIsType
     DerivingStrategies
   hs-source-dirs: src

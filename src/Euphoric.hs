@@ -1,6 +1,7 @@
 module Euphoric where
 
-import Data.Kind (Type)
+import Prelude.Experimental
+import Data.Kind (Type, Constraint)
 import Data.Proxy
 import GHC.TypeLits
 import Control.Monad.Trans.State
@@ -10,83 +11,97 @@ import qualified Language.Haskell.TH.Ppr as TH.Ppr
 import qualified Language.Haskell.TH.PprLib as TH.Ppr
 import MiniQ
 
+type KPairs = List (Tuple2 Symbol Type)
+
+type Grammar :: k -> (Type -> Type) -> KPairs -> Type
 data Grammar tok m prods = MkGrammar (GrammarBuilder tok m prods prods)
 
-data GrammarBuilder tok m (allProds :: [(Symbol, Type)]) (prods :: [(Symbol, Type)]) where
-  EndOfGrammar :: GrammarBuilder tok m allProds '[]
+type GrammarBuilder :: k -> (Type -> Type) -> KPairs -> KPairs -> Type
+data GrammarBuilder tok m allProds prods where
+  EndOfGrammar :: GrammarBuilder tok m allProds []
   GrammarCons ::
     KnownSymbol sym =>
     Proxy sym ->
     Prod tok m allProds ty ->
     GrammarBuilder tok m allProds prods ->
-    GrammarBuilder tok m allProds ('(sym, ty) : prods)
+    GrammarBuilder tok m allProds ((sym, ty) : prods)
 
+type Symbols :: List Symbol -> Type
 data Symbols xs where
-  SymbolsNil :: Symbols '[]
+  SymbolsNil :: Symbols []
   SymbolsCons :: KnownSymbol x => Proxy x -> Symbols xs -> Symbols (x : xs)
 
+type Syms :: List Symbol -> Constraint
 class Syms xs where
-  syms :: Symbols xs
-instance Syms '[] where
-  syms = SymbolsNil
+  symbols :: Symbols xs
+instance Syms [] where
+  symbols = SymbolsNil
 instance (KnownSymbol x, Syms xs) => Syms (x : xs) where
-  syms = SymbolsCons Proxy syms
+  symbols = SymbolsCons Proxy symbols
 
-symbolsVal :: Symbols xs -> [String]
+symbolsVal :: Symbols xs -> List String
 symbolsVal SymbolsNil = []
-symbolsVal (SymbolsCons symProxy symbols) = symbolVal symProxy : symbolsVal symbols
+symbolsVal (SymbolsCons symProxy syms) = symbolVal symProxy : symbolsVal syms
 
-type family Repr (prods :: [(Symbol, Type)]) (sym :: Symbol) where
-  Repr '[] sym = TypeError ('Text sym ':<>: 'Text " is not a symbol of the grammar")
-  Repr ('(sym, ty):_) sym = ty
+type Repr :: KPairs -> Symbol -> Type
+type family Repr prods sym where
+  Repr [] sym = TypeError ('Text sym ':<>: 'Text " is not a symbol of the grammar")
+  Repr ((sym, ty):_) sym = ty
   Repr (_:prods) sym = Repr prods sym
 
+type WithReprs :: KPairs -> List Symbol -> Type -> Type
 type family WithReprs allProds syms ty where
-  WithReprs allProds '[] ty = ty
+  WithReprs allProds [] ty = ty
   WithReprs allProds (sym:syms) ty =
     Repr allProds sym -> WithReprs allProds syms ty
 
+type Rule :: KPairs -> (Type -> Type) -> Type -> Type
 data Rule allProds m ty =
   forall syms. MkRule  (Symbols syms) (TExp (WithReprs allProds syms ty)) |
   forall syms. MkRuleM (Symbols syms) (TExp (WithReprs allProds syms (m ty)))
 
-data Prod tok m (allProds :: [(Symbol, Type)]) ty =
+type Prod :: k -> (Type -> Type) -> KPairs -> Type -> Type
+data Prod tok m allProds ty =
   MkTerm Pat |
-  MkNonTerm [Rule allProds m ty]
+  MkNonTerm (List (Rule allProds m ty))
 
-rule ::
-  forall syms allProds m ty.
+(==>) ::
+  forall syms ->
+  forall allProds m ty.
   Syms syms =>
   TH.Code MiniQ (WithReprs allProds syms ty) ->
-  State [Rule allProds m ty] ()
-rule reduction = modify (MkRule (syms @syms) (runMiniQ (TH.examineCode reduction)):)
+  State (List (Rule allProds m ty)) Unit
+syms ==> reduction = modify (MkRule (symbols @syms) (runMiniQ (TH.examineCode reduction)):)
 
-ruleM ::
-  forall syms allProds m ty.
+(==>%) ::
+  forall syms ->
+  forall allProds m ty.
   Syms syms =>
   TH.Code MiniQ (WithReprs allProds syms (m ty)) ->
-  State [Rule allProds m ty] ()
-ruleM reduction = modify (MkRuleM (syms @syms) (runMiniQ (TH.examineCode reduction)):)
+  State (List (Rule allProds m ty)) Unit
+syms ==>% reduction = modify (MkRuleM (symbols @syms) (runMiniQ (TH.examineCode reduction)):)
 
 tm ::
-  forall sym tok m allProds prods.
+  forall sym ->
+  forall tok m allProds prods.
   KnownSymbol sym =>
   MiniQ Pat ->
   GrammarBuilder tok m allProds prods ->
-  GrammarBuilder tok m allProds ('(sym, tok) : prods)
-tm f = GrammarCons Proxy (MkTerm (runMiniQ f))
+  GrammarBuilder tok m allProds ((sym, tok) : prods)
+tm _ f = GrammarCons Proxy (MkTerm (runMiniQ f))
 
 nt ::
-  forall sym ty tok m allProds prods.
+  forall sym ty ->
+  forall tok m allProds prods.
   KnownSymbol sym =>
-  State [Rule allProds m ty] () ->
+  State (List (Rule allProds m ty)) Unit ->
   GrammarBuilder tok m allProds prods ->
-  GrammarBuilder tok m allProds ('(sym, ty) : prods)
-nt s = GrammarCons Proxy (MkNonTerm (execState s []))
+  GrammarBuilder tok m allProds ((sym, ty) : prods)
+nt _ _ s = GrammarCons Proxy (MkNonTerm (execState s []))
 
-data UGrammar = UGrammar [(String, Pat)] [(String, [URule])]
+data UGrammar = UGrammar (List (Tuple2 String Pat)) (List (Tuple2 String (List URule)))
 
-data URule = URule [String] Exp | URuleM [String] Exp
+data URule = URule (List String) Exp | URuleM (List String) Exp
 
 toUGrammar :: Grammar tok m prods -> UGrammar
 toUGrammar (MkGrammar g) = toUGrammar' g
@@ -103,10 +118,10 @@ toUGrammar' (GrammarCons symProxy p g) =
       in UGrammar utms ((sym,urules):unts)
 
 toURule :: Rule allProds m ty -> URule
-toURule (MkRule symbols texp) =
-  URule (symbolsVal symbols) (TH.unType texp)
-toURule (MkRuleM symbols texp) =
-  URuleM (symbolsVal symbols) (TH.unType texp)
+toURule (MkRule syms texp) =
+  URule (symbolsVal syms) (TH.unType texp)
+toURule (MkRuleM syms texp) =
+  URuleM (symbolsVal syms) (TH.unType texp)
 
 pprUSym :: String -> TH.Ppr.Doc
 pprUSym = TH.Ppr.quotes . TH.Ppr.text
@@ -119,10 +134,10 @@ pprUGrammar (UGrammar utms unts) =
   TH.Ppr.text "%%" TH.Ppr.$$
     TH.Ppr.vcat (map pprUNonTerm unts)
 
-pprUTerm :: (String, Pat) -> TH.Ppr.Doc
+pprUTerm :: Tuple2 String Pat -> TH.Ppr.Doc
 pprUTerm (s, pat) = pprUSym s TH.Ppr.<+> TH.Ppr.braces (TH.Ppr.ppr pat)
 
-pprUNonTerm :: (String, [URule]) -> TH.Ppr.Doc
+pprUNonTerm :: Tuple2 String (List URule) -> TH.Ppr.Doc
 pprUNonTerm (_, []) = error "pprUNonTerm: empty rules"
 pprUNonTerm (s, rule1:rules) =
   TH.Ppr.hang (pprUSym s) 2 $
